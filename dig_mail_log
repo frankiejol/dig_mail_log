@@ -1,0 +1,119 @@
+#!/usr/bin/perl -w
+
+
+use strict;
+
+use Data::Dumper;
+use Getopt::Long(qw(GetOptions));
+
+my $VERSION="0.9";
+my $SKIP_RELAY = qr'^\d+.';
+
+my $log_file="/var/adm/mail.log";
+
+foreach ( qw (/var/adm/mail.log /var/adm/maillog /var/log/mail.log /var/log/maillog
+				/var/adm/mail /var/log/mail)) {
+	if ( -f $_ && ! -z $_ ) {
+		$log_file=$_;
+		last;
+	}
+}
+
+my $USAGE="[--file $log_file] [--to address | --from address] [--verbose]";
+
+my ($TO,$FROM,$VERBOSE);
+
+my $result=GetOptions(
+						'file=s' => \$log_file,
+                        'to=s'=> \$TO, 
+                        'from=s' => \$FROM,
+						'verbose' => \$VERBOSE
+);
+
+unless (defined $TO || defined $FROM) {
+	$0=~s!.*/!!;
+	die "$0 $VERSION\n$0 $USAGE\n";
+}
+
+my %LOG;
+my %FORWARDED;
+########################################################
+
+#sub add_log {
+#    my ($id,$line) = @_;
+#	push @{$LOG{$id}->{data}},($line);
+#}
+
+sub add_log_verbose {
+    my ($id,$line) = @_;
+	push @{$LOG{$id}->{verbose}},($line);
+}
+
+sub set_log_field {
+    my ($id,$field) = @_;
+    for my $key (keys %$field) {
+        $LOG{$id}->{$key} = $field->{$key};
+    }
+}
+
+open LOG,"<$log_file" or die "$! $log_file\n";
+my $log_from;
+my $print_to=0;
+my ($current_id,$former_id) = (-1,-2);
+my $n = 0;
+while (my $line = <LOG>) {
+
+    my $debug = 0;
+
+    print $line if $debug;
+	my @field=split /\s+/,$line;
+
+	$current_id=$field[5] or die "I can't find 5th field in $line "
+        .join (" , ",@field);
+
+	next unless $current_id=~/[0-9A-F]+:$/;
+    $current_id =~ s/:$//;
+
+    print "$current_id\n"   if $debug;
+
+	if ($current_id ne $former_id) {
+        set_log_field($current_id, { n=> $n++ , data => [] });
+		$former_id=$current_id;
+	}
+    add_log_verbose($current_id,$line)  if $VERBOSE;
+
+    my ($log_from)  = $line =~ /from=<(.*?)>/;
+    if ($log_from) {
+        set_log_field($current_id,{ from => $log_from });
+        set_log_field($current_id,{ date => "$field[0] $field[1] $field[2]"});
+    }
+    my ($log_to)    = $line =~ /to=<(.*?)>/;
+    set_log_field($current_id,{ to => $log_to })    if $log_to;
+
+    my ($relay) = $line =~ /relay=(.*?) /;
+    set_log_field($current_id,{ relay => $relay})    if $relay;
+
+    my ($forwarded) = $line =~ /forwarded as ([0-9A-F]+)\)/;
+    $FORWARDED{$forwarded} = $current_id    if $forwarded;
+}
+close LOG;
+
+for my $key (sort {$LOG{$a}->{n} <=> $LOG{$b}->{n} } keys %LOG) {
+    next if !$LOG{$key}->{date};
+    next if $FROM && $LOG{$key}->{from} !~ /^$FROM/;
+    next if $TO && $LOG{$key}->{to} !~ /^$TO/;
+    next if $SKIP_RELAY && $LOG{$key}->{relay}
+                        && $LOG{$key}->{relay} =~ /$SKIP_RELAY/;
+#    print "$key\t";
+    if ($FORWARDED{$key}) {
+        print "\t --> $LOG{$key}->{to}\n";
+    } else {
+        print $LOG{$key}->{date}. " ". $LOG{$key}->{from}." -> "
+            .$LOG{$key}->{to}."\n";
+    }
+    for (@{$LOG{$key}->{verbose}}) {
+        print ;
+    }
+    print "--------------------------------------------------\n"
+        if $LOG{$key}->{verbose}->[0];
+}
