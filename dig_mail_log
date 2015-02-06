@@ -3,7 +3,6 @@
 
 use strict;
 
-use Data::Dumper;
 use Getopt::Long(qw(GetOptions));
 
 my $VERSION="0.9";
@@ -63,9 +62,6 @@ my ($current_id,$former_id) = (-1,-2);
 my $n = 0;
 while (my $line = <LOG>) {
 
-    my $debug = 0;
-
-    print $line if $debug;
 	my @field=split /\s+/,$line;
 
 	$current_id=$field[5] or die "I can't find 5th field in $line "
@@ -73,8 +69,6 @@ while (my $line = <LOG>) {
 
 	next unless $current_id=~/[0-9A-F]+:$/;
     $current_id =~ s/:$//;
-
-    print "$current_id\n"   if $debug;
 
 	if ($current_id ne $former_id) {
         set_log_field($current_id, { n=> $n++ , data => [] });
